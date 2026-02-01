@@ -8,7 +8,8 @@
 #define WRAP32  32
 #define maskF32 0xFFFFFFFF
 
-__device__ int warp_sum ( int s ) {
+template <typename T>
+__device__ T warp_sum ( T s ) {
 
     s += __shfl_down_sync( maskF32 , s , 16 ); // 32/2
     s += __shfl_down_sync( maskF32 , s ,  8 );
@@ -20,9 +21,10 @@ __device__ int warp_sum ( int s ) {
 
 }
 
-__global__ void sum_kernel(int* aPtr, int width, int hieght , int* aPtr_total ) {
+template <typename T>
+__global__ void sum_kernel(T* aPtr, int width, int hieght , T* aPtr_total ) {
 
-    extern __shared__ int shared_data [] ;
+    extern __shared__ T shared_data [] ;
 
     const unsigned int tid = threadIdx.x;
     const unsigned int gid = ( blockIdx.x * blockDim.x ) + threadIdx.x;
@@ -30,7 +32,7 @@ __global__ void sum_kernel(int* aPtr, int width, int hieght , int* aPtr_total ) 
     const unsigned int a_element_num = width * hieght;
 
     // private memory
-    int private_sum = 0;
+    T private_sum = 0;
     for ( unsigned int i = gid ; i < a_element_num ; i += grid_size ){
         private_sum += aPtr[i];
     }
@@ -48,11 +50,11 @@ __global__ void sum_kernel(int* aPtr, int width, int hieght , int* aPtr_total ) 
     // Wrap up
     if ( tid < WRAP32 ) {
 
-        int final_val = shared_data [ tid ] ;
+        T final_val = shared_data [ tid ] ;
         final_val =  warp_sum( final_val ) ;
 
         if ( tid == 0 ) {
-            printf ("[%i] shard[0] = %i\n", blockIdx.x , final_val ) ;
+            //printf ("[%i] shard[0] = %i\n", blockIdx.x , final_val ) ;
             atomicAdd( aPtr_total, final_val ) ;
         }
     }
@@ -60,46 +62,50 @@ __global__ void sum_kernel(int* aPtr, int width, int hieght , int* aPtr_total ) 
 
 }
 
+typedef int DATA_TYPE ;
+
 int main() {
 
     cudaError_t err ;
     const dim3 threadsPerBlock( WRAP32 ,  1, 1 ) ;
     const dim3 block_num      (     16 ,  1, 1 ) ;
-    const unsigned int shared_bytes = threadsPerBlock.x * sizeof( int ) ;
+    const unsigned int shared_bytes = threadsPerBlock.x * sizeof( DATA_TYPE ) ;
 
     size_t width  = 100;
     size_t height = 100;
 
-    int * h_a ;
-    int * d_a ;
+    DATA_TYPE * h_a = NULL ;
+    DATA_TYPE * d_a = NULL ;
 
     const unsigned int a_element_num = width * height ;
-    const unsigned int a_bytes = width * height  * sizeof ( int ) ;
+    const unsigned int a_bytes = width * height  * sizeof ( DATA_TYPE ) ;
 
-    h_a = ( int * )malloc( a_bytes );
+    h_a = ( DATA_TYPE * ) malloc ( a_bytes );
 
     for ( unsigned int i = 0; i < a_element_num ; i++){ h_a [ i ] = 1 ; }
 
 
-    int * h_aTotal = ( int * ) malloc ( sizeof ( int ) ) ;
-    int * d_atotal ;
-    const int zero = 0;
+    const unsigned int d_atotal_bytes = sizeof ( DATA_TYPE ) ;
+    DATA_TYPE * h_aTotal = ( DATA_TYPE * ) malloc ( d_atotal_bytes ) ;
+    DATA_TYPE * d_atotal = NULL ;
+    const DATA_TYPE zero = 0 ;
 
 
-    err = cudaMalloc ( (void**)&d_a, a_bytes ) ;                            cuPERR(err) ;
-    err = cudaMalloc ( (void**)&d_atotal, sizeof ( int ) ) ;                cuPERR(err) ;
+    err = cudaMalloc ( (void**)&d_a, a_bytes ) ;                               cuPERR(err) ;
+    err = cudaMalloc ( (void**)&d_atotal, sizeof ( DATA_TYPE ) ) ;             cuPERR(err) ;
 
-    err = cudaMemcpy( d_a, h_a, a_bytes, cudaMemcpyHostToDevice );          cuPERR(err) ;
-    err = cudaMemcpy(d_atotal, &zero, sizeof(int), cudaMemcpyHostToDevice); cuPERR(err) ;
+    // tranport the data from host to device
+    err = cudaMemcpy( d_a, h_a, a_bytes, cudaMemcpyHostToDevice );             cuPERR(err) ;
+    err = cudaMemcpy(d_atotal, &zero, sizeof( zero ), cudaMemcpyHostToDevice); cuPERR(err) ;
 
     // launch the kenel
-    sum_kernel <<< block_num , threadsPerBlock , shared_bytes >>>( d_a, width, height , d_atotal );
+    sum_kernel <DATA_TYPE> <<< block_num , threadsPerBlock , shared_bytes >>>( d_a, width, height , d_atotal );
     err = cudaGetLastError();  cuPERR(err) ;
 
-    // get the sum
-    err = cudaMemcpy ( h_aTotal , d_atotal , sizeof(int) , cudaMemcpyDeviceToHost ) ;  cuPERR(err) ;
+    // tranport result from deive to host
+    err = cudaMemcpy ( h_aTotal , d_atotal , d_atotal_bytes , cudaMemcpyDeviceToHost ) ;  cuPERR(err) ;
 
-    printf("sum: %d\n", *h_aTotal );
+    printf("sum: %lf\n", ( double ) *h_aTotal );
 
     cudaDeviceSynchronize();
 
