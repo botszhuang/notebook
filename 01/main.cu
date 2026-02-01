@@ -2,60 +2,50 @@
 #include <stdlib.h>
 
 #include <cuda_runtime.h>
-#define N 3
 
-__global__ void matrix_mul(int *a, int *b, int *c, int n) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    int j = blockIdx.y * blockDim.y + threadIdx.y;
-    int sum = 0;
-    if (i < n && j < n) {
-        for (int k = 0; k < n; k++)
-            sum += a[i * n + k] * b[k * n + j];
-        c[i * n + j] = sum;
-    }
-}
+#define myUINT unsigned int
+#define A_TYPE int
+
 
 int main() {
-    int n = N;
-    int *a, *b, *c;
-    int *d_a, *d_b, *d_c;
-    int size = n * n * sizeof(int);
 
-    a = (int *)malloc(size);
-    b = (int *)malloc(size);
-    c = (int *)malloc(size);
+    cudaError_t err ;
 
-    for (int i = 0; i < n; i++)
-        for (int j = 0; j < n; j++) {
-            a[i * n + j] = i + j;
-            b[i * n + j] = i * j;
-        }
+    size_t width  = 100;
+    size_t height = 10;
+    size_t pitch  = 0 ;
 
-    cudaMalloc((void **)&d_a, size);
-    cudaMalloc((void **)&d_b, size);
-    cudaMalloc((void **)&d_c, size);
+    A_TYPE * h_a ;
+    A_TYPE * d_a ;
 
-    cudaMemcpy(d_a, a, size, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_b, b, size, cudaMemcpyHostToDevice);
+    const myUINT total_elements = width * height ;
+    const myUINT total_bytes = width * height  * sizeof ( A_TYPE ) ;
+    const myUINT width_in_bytes = width * sizeof ( A_TYPE ) ;
 
-    dim3 blockSize(N, N);
-    dim3 gridSize((n + N - 1) / N, (n + N - 1) / N);
-    matrix_mul<<<gridSize, blockSize>>>(d_a, d_b, d_c, n);
+    h_a = ( A_TYPE * )malloc( total_bytes );
 
-    cudaMemcpy(c, d_c, size, cudaMemcpyDeviceToHost);
 
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++)
-            printf("%d ", c[i * n + j]);
-        printf("\n");
+    for ( myUINT i = 0; i < total_elements ; i++){ h_a [ i ] = i ; }
+
+    err = cudaMallocPitch( (void**)&d_a, & pitch , width_in_bytes , height ) ;
+
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error: %s\n", cudaGetErrorString(err));
+        cudaFree( d_a );
+        free(h_a);
+        return EXIT_FAILURE;
     }
 
-    cudaFree(d_a);
-    cudaFree(d_b);
-    cudaFree(d_c);
-    free(a);
-    free(b);
-    free(c);
+    printf("Logical Width: %zu elements (%u bytes)\n", width, width_in_bytes);
+    printf("Actual Pitch: %zu bytes\n", pitch);
 
-    return 0;
+    cudaMemcpy2D( d_a, pitch, h_a, width_in_bytes, width_in_bytes, height, cudaMemcpyHostToDevice);
+
+    cudaDeviceSynchronize();
+
+    cudaFree( d_a );
+    free( h_a );
+
+
+    return EXIT_SUCCESS ;
 }

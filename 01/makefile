@@ -10,10 +10,6 @@ SRCs := $(shell find $(SRC_DIRS) -name *.c -or -name *.cpp -or -name *.cu)
 cINC_DIRS := $(shell find $(SRC_DIRS) -type d)
 cINC_FLAGS := $(addprefix -I,$(cINC_DIRS))
 
-#OPENCV_CFLAGS := $(shell pkg-config --cflags opencv4)
-#OPENCV_LIBS   := $(shell pkg-config --libs opencv4)
-
-
 NVCC_FLAGS := -O2 -arch=sm_75 $(cINC_FLAGS) -diag-suppress 611
 
 all: $(TARGET)
